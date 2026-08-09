@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <title>PackCheck</title>
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">PACKCHECK</div>
+    <h1 id="tripTitle">Packing List</h1>
+  </div>
+  <button id="newTripBtn" class="icon-btn" aria-label="New trip">＋</button>
+</header>
+
+<main>
+  <section id="tripSetup" class="card">
+    <h2>Trip</h2>
+    <div class="grid">
+      <label>Trip name<input id="tripName" placeholder="Weekend getaway"></label>
+      <label>Trip date<input id="tripDate" type="date"></label>
+    </div>
+    <button id="saveTrip" class="primary">Save trip</button>
+  </section>
+
+  <section id="dashboard" class="hidden">
+    <div class="stats card">
+      <div><strong id="verifiedCount">0</strong><span>Verified</span></div>
+      <div><strong id="packedCount">0</strong><span>Packed</span></div>
+      <div><strong id="attentionCount">0</strong><span>Needs attention</span></div>
+      <div><strong id="totalCount">0</strong><span>Total</span></div>
+    </div>
+
+    <div id="readiness" class="readiness card"></div>
+
+    <div class="actions">
+      <button id="addItemBtn" class="primary">＋ Add item</button>
+      <button id="verifyBtn" class="secondary">Start verification</button>
+    </div>
+
+    <div class="toolbar">
+      <select id="filter">
+        <option value="all">All items</option>
+        <option value="todo">To pack</option>
+        <option value="packed">Packed</option>
+        <option value="verified">Verified</option>
+        <option value="attention">Needs attention</option>
+      </select>
+      <button id="manageCategories" class="secondary">Categories</button>
+    </div>
+
+    <div id="categories"></div>
+  </section>
+</main>
+
+<dialog id="itemDialog">
+  <form method="dialog" id="itemForm" class="modal">
+    <h2 id="itemDialogTitle">Add item</h2>
+    <input type="hidden" id="editId">
+    <label>Item<input id="itemName" required placeholder="Passport"></label>
+    <div class="grid">
+      <label>Category<select id="itemCategory"></select></label>
+      <label>Quantity (optional)<input id="itemQty" type="number" min="1" placeholder="1"></label>
+    </div>
+    <label>Tags <input id="itemTags" placeholder="Shubham, baby, car"></label>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close>Cancel</button>
+      <button class="primary" value="default">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="verifyDialog">
+  <div class="modal verify-modal">
+    <div class="eyebrow">INDEPENDENT VERIFICATION</div>
+    <h2 id="verifyItemName"></h2>
+    <p id="verifyDetails"></p>
+    <p class="muted">Physically confirm it is in the bag. Do not rely on the earlier packing check.</p>
+    <div class="verify-actions">
+      <button id="notFound" class="danger">Not found</button>
+      <button id="verified" class="primary">Yes, verified</button>
+    </div>
+    <button id="stopVerify" class="text-btn">Stop verification</button>
+  </div>
+</dialog>
+
+<dialog id="categoryDialog">
+  <form method="dialog" id="categoryForm" class="modal">
+    <h2>Categories</h2>
+    <div id="categoryList"></div>
+    <label>New category<input id="newCategory" placeholder="Camping"></label>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close>Close</button>
+      <button class="primary" value="default">Add category</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script><script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
+</body>
+</html>
