@@ -1,105 +1,37 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#4f46e5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="PackCheck" />
   <title>PackCheck</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<header class="topbar">
-  <div>
-    <div class="eyebrow">PACKCHECK</div>
-    <h1 id="tripTitle">Packing List</h1>
-  </div>
-  <button id="newTripBtn" class="icon-btn" aria-label="New trip">＋</button>
-</header>
+  <div id="app" aria-live="polite"></div>
+  <div id="toast" role="status" aria-live="assertive"></div>
+  <div id="offline" hidden>Offline — changes are saved and will sync</div>
 
-<main>
-  <section id="tripSetup" class="card">
-    <h2>Trip</h2>
-    <div class="grid">
-      <label>Trip name<input id="tripName" placeholder="Weekend getaway"></label>
-      <label>Trip date<input id="tripDate" type="date"></label>
-    </div>
-    <button id="saveTrip" class="primary">Save trip</button>
-  </section>
-
-  <section id="dashboard" class="hidden">
-    <div class="stats card">
-      <div><strong id="verifiedCount">0</strong><span>Verified</span></div>
-      <div><strong id="packedCount">0</strong><span>Packed</span></div>
-      <div><strong id="attentionCount">0</strong><span>Needs attention</span></div>
-      <div><strong id="totalCount">0</strong><span>Total</span></div>
-    </div>
-
-    <div id="readiness" class="readiness card"></div>
-
-    <div class="actions">
-      <button id="addItemBtn" class="primary">＋ Add item</button>
-      <button id="verifyBtn" class="secondary">Start verification</button>
-    </div>
-
-    <div class="toolbar">
-      <select id="filter">
-        <option value="all">All items</option>
-        <option value="todo">To pack</option>
-        <option value="packed">Packed</option>
-        <option value="verified">Verified</option>
-        <option value="attention">Needs attention</option>
-      </select>
-      <button id="manageCategories" class="secondary">Categories</button>
-    </div>
-
-    <div id="categories"></div>
-  </section>
-</main>
-
-<dialog id="itemDialog">
-  <form method="dialog" id="itemForm" class="modal">
-    <h2 id="itemDialogTitle">Add item</h2>
-    <input type="hidden" id="editId">
-    <label>Item<input id="itemName" required placeholder="Passport"></label>
-    <div class="grid">
-      <label>Category<select id="itemCategory"></select></label>
-      <label>Quantity (optional)<input id="itemQty" type="number" min="1" placeholder="1"></label>
-    </div>
-    <label>Tags <input id="itemTags" placeholder="Shubham, baby, car"></label>
-    <div class="modal-actions">
-      <button type="button" class="secondary" data-close>Cancel</button>
-      <button class="primary" value="default">Save</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="verifyDialog">
-  <div class="modal verify-modal">
-    <div class="eyebrow">INDEPENDENT VERIFICATION</div>
-    <h2 id="verifyItemName"></h2>
-    <p id="verifyDetails"></p>
-    <p class="muted">Physically confirm it is in the bag. Do not rely on the earlier packing check.</p>
-    <div class="verify-actions">
-      <button id="notFound" class="danger">Not found</button>
-      <button id="verified" class="primary">Yes, verified</button>
-    </div>
-    <button id="stopVerify" class="text-btn">Stop verification</button>
-  </div>
-</dialog>
-
-<dialog id="categoryDialog">
-  <form method="dialog" id="categoryForm" class="modal">
-    <h2>Categories</h2>
-    <div id="categoryList"></div>
-    <label>New category<input id="newCategory" placeholder="Camping"></label>
-    <div class="modal-actions">
-      <button type="button" class="secondary" data-close>Close</button>
-      <button class="primary" value="default">Add category</button>
-    </div>
-  </form>
-</dialog>
-
-<script src="app.js"></script><script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
+  <!-- Copy config.example.js -> config.js and fill it in first. Loaded as a classic
+       script so a missing config shows a friendly message, not a hard module error. -->
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () =>
+        navigator.serviceWorker.register("service-worker.js").catch(() => {})
+      );
+    }
+    const off = document.getElementById("offline");
+    const setNet = () => { off.hidden = navigator.onLine; };
+    window.addEventListener("online", setNet);
+    window.addEventListener("offline", setNet);
+    setNet();
+  </script>
 </body>
 </html>

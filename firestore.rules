@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// ── PackCheck rules ───────────────────────────────────────────────────────────
+// If you are REUSING an existing Firebase project, do NOT paste this whole file
+// over your current rules. Copy ONLY the `match /packcheck_trips/...` block into
+// your existing `service cloud.firestore { match /databases/{db}/documents { ... } }`
+// and keep the emails in sync with config.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAllowed() {
+      return request.auth != null
+        && request.auth.token.email in [
+             "you@gmail.com",
+             "partner@gmail.com"
+           ];
+    }
+
+    match /packcheck_trips/{tripId} {
+      allow read, write: if isAllowed();
+
+      match /items/{itemId} {
+        allow read, write: if isAllowed();
+      }
+    }
+  }
+}
