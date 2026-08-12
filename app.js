@@ -133,13 +133,17 @@ const mkItem = (name, cat, extra = {}) => ({
   packedBy: "", packedByName: "", selfVerified: false, toBuy: false,
   verifiedAt: null, verifiedBy: "", createdAt: Date.now(), ...extra,
 });
+// A "layer" is a trip type or season. Its item set is the user's saved override
+// (state.templates[layer]) if present, otherwise the built-in default in code.
+const layerDefault = (key) => (TYPE[key] || SEASON[key] || []).map((d) => ({ n: d.n, c: d.c, req: !!d.req }));
+const layerItems = (key) => (state.templates && state.templates[key]) ? state.templates[key] : layerDefault(key);
 const composeList = ({ types, season, startDate, travelers }) => {
   const defs = [];
-  (types || []).forEach((t) => (TYPE[t] || []).forEach((d) => defs.push(d)));
+  (types || []).forEach((t) => layerItems(t).forEach((d) => defs.push(d)));
   const s = season === "Auto" ? autoSeason(startDate) : season;
-  (SEASON[s] || []).forEach((d) => defs.push(d));
+  layerItems(s).forEach((d) => defs.push(d));
   const hasBaby = (travelers || []).some((t) => /baby|infant/i.test(t)) || (types || []).includes("Trip with baby");
-  if (hasBaby) BABY.forEach((d) => defs.push(d));
+  if (hasBaby) layerItems("Trip with baby").forEach((d) => defs.push(d));
   const byKey = new Map();
   defs.forEach((d) => {
     const k = d.n.toLowerCase();
@@ -150,7 +154,8 @@ const composeList = ({ types, season, startDate, travelers }) => {
 };
 const baseCats = () => (state.categoriesLoaded && state.categories.length ? state.categories : KNOWN_CATS);
 const catList = (t) => { const s = new Set(baseCats());
-  (t ? t.items : state.items).forEach((i) => i.category && s.add(i.category)); return [...s]; };
+  (t ? t.items : state.items).forEach((i) => i.category && s.add(i.category));
+  return [...s].sort((a, b) => a.localeCompare(b)); };
 const catMatch = (raw) => { const t = raw.trim().toLowerCase();
   return baseCats().find((c) => c.toLowerCase() === t) || KNOWN_CATS.find((c) => c.toLowerCase() === t) || null; };
 const parseBulk = (text, fallbackCat = "Essentials") => {
@@ -196,13 +201,14 @@ const stats = (t) => {
   };
 };
 const catsOf = (t) => {
-  const order = ["Documents","Essentials","Clothes","Toiletries","Electronics","Baby","Food","Car"];
+  const pin = ["Documents", "Essentials"];
   const map = {};
   t.items.forEach((i) => (map[i.category] = map[i.category] || []).push(i));
   return Object.keys(map).sort((a, b) => {
-    const ia = order.indexOf(a), ib = order.indexOf(b);
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
-  }).map((c) => [c, map[c]]);
+    const pa = pin.indexOf(a), pb = pin.indexOf(b);
+    if (pa !== -1 || pb !== -1) return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+    return a.localeCompare(b);
+  }).map((c) => [c, map[c].sort((x, y) => x.name.localeCompare(y.name))]);
 };
 
 /* ---------------- firestore refs ---------------- */
@@ -214,7 +220,7 @@ const configDoc = () => doc(db, P + "meta", "config");
 
 /* ---------------- app state ---------------- */
 let me = null;
-const state = { trips: [], items: [], tripId: null, tripsReady: false, categories: [], categoriesLoaded: false };
+const state = { trips: [], items: [], tripId: null, tripsReady: false, categories: [], categoriesLoaded: false, templates: {} };
 let unsubTrips = null, unsubItems = null, unsubConfig = null;
 let route = { name: "home" };
 let openCats = {};
@@ -233,7 +239,7 @@ onAuthStateChanged(auth, (user) => {
   if (unsubItems) { unsubItems(); unsubItems = null; }
   if (unsubConfig) { unsubConfig(); unsubConfig = null; }
   state.trips = []; state.items = []; state.tripsReady = false;
-  state.categories = []; state.categoriesLoaded = false;
+  state.categories = []; state.categoriesLoaded = false; state.templates = {};
   if (user && allowed(user)) { watchTrips(); watchConfig(); }
   render();
 });
@@ -264,6 +270,7 @@ function watchConfig() {
     if (!snap.exists()) { setDoc(configDoc(), { categories: KNOWN_CATS.slice() }).catch(()=>{}); return; }
     const c = snap.data() || {};
     state.categories = Array.isArray(c.categories) && c.categories.length ? c.categories : KNOWN_CATS.slice();
+    state.templates = (c.templates && typeof c.templates === "object") ? c.templates : {};
     state.categoriesLoaded = true;
     if (route.name === "trip" || route.name === "new") render();
   }, () => {});
@@ -361,7 +368,7 @@ function renderHome() {
 
   app.innerHTML = `<div class="screen">
     <div class="top"><div class="brand"><div class="mark">PC</div><h1>PackCheck</h1></div>
-      <button class="who" data-menu aria-label="Account and data">${initialOf(me)}</button></div>
+      <button class="hb" data-menu aria-label="Menu">☰</button></div>
     ${trips.length ? `<div class="eyebrow">Your trips</div>${cards}`
       : (state.tripsReady ? emptyHome() : renderLoadingInline())}
   </div>
@@ -369,7 +376,7 @@ function renderHome() {
 
   $("[data-new]").onclick = () => go({ name: "new" });
   app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => go({ name: "trip", id: b.dataset.open, tab: "packing" })));
-  $("[data-menu]").onclick = dataMenu;
+  $("[data-menu]").onclick = () => openMenu();
 }
 const renderLoadingInline = () => `<div class="empty"><div class="big">🧳</div><p>Loading your trips…</p></div>`;
 const emptyHome = () => `<div class="empty"><div class="big">🧳</div><h2>No trips yet</h2>
@@ -381,7 +388,8 @@ const nt = () => (ntState || (ntState = { name: "", destination: "", startDate: 
 function renderNew() {
   const f = nt();
   app.innerHTML = `<div class="screen">
-    <div class="top"><button class="back" data-back aria-label="Back">‹</button><h1>New trip</h1></div>
+    <div class="top"><button class="back" data-back aria-label="Back">‹</button><h1 style="flex:1">New trip</h1>
+      <button class="hb" data-menu aria-label="Menu">☰</button></div>
     <div class="field"><label>Trip name</label><input type="text" id="f-name" placeholder="Big Bend Weekend" value="${esc(f.name)}"></div>
     <div class="field"><label>Destination</label><input type="text" id="f-dest" placeholder="Big Bend, TX" value="${esc(f.destination)}"></div>
     <div class="row">
@@ -398,6 +406,7 @@ function renderNew() {
     <button class="btn wide" data-create>Generate packing list</button><div style="height:12px"></div></div>`;
 
   $("[data-back]").onclick = () => { ntState = null; go({ name: "home" }); };
+  $("[data-menu]").onclick = () => openMenu();
   const sync = () => { f.name=$("#f-name").value; f.destination=$("#f-dest").value;
     f.startDate=$("#f-start").value; f.endDate=$("#f-end").value; f.travelers=$("#f-trav").value; };
   ["f-name","f-dest","f-start","f-end","f-trav"].forEach((id) => $("#"+id).oninput = sync);
@@ -436,7 +445,7 @@ function renderTrip(t) {
     <div class="top"><button class="back" data-home aria-label="Back">‹</button>
       <div style="flex:1;min-width:0"><h1 style="font-size:20px">${esc(t.name)}</h1>
         <div class="sub">${esc(t.destination||"")}${t.destination?" · ":""}${fmtRange(t.startDate,t.endDate)}</div></div>
-      <button class="who" data-tmenu aria-label="Trip menu">⋯</button></div>
+      <button class="hb" data-menu aria-label="Menu">☰</button></div>
 
     <div class="tripbar"><div class="card">
       <div class="prog"><div class="lbl"><span>Packed</span><span>${s.packed}/${s.total}</span></div>
@@ -455,7 +464,7 @@ function renderTrip(t) {
     ${tab==="packing"?`<button class="fab" data-add>＋ Add items</button>`:""}`;
 
   $("[data-home]").onclick = () => go({ name: "home" });
-  $("[data-tmenu]").onclick = () => tripMenu(t);
+  $("[data-menu]").onclick = () => openMenu(t);
   app.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => go({ name:"trip", id:t.id, tab:b.dataset.tab }));
   const addBtn = $("[data-add]"); if (addBtn) addBtn.onclick = () => addSheet(t);
 
@@ -717,49 +726,52 @@ function failSheet(t, i) {
 }
 
 /* ================= MENUS ================= */
-function tripMenu(t) {
-  const s = sheet(`<div class="grip"></div>
-    <div class="shead"><h2>${esc(t.name)}</h2><button class="x" data-x>✕</button></div>
+function openMenu(t) {
+  const tripSection = t ? `
+    <div class="eyebrow" style="margin:2px 0 8px">This trip</div>
     <button class="btn sec wide" data-buy style="margin-bottom:10px">🛒 Shopping list (to buy)</button>
     <button class="btn sec wide" data-copy style="margin-bottom:10px">Copy as new trip</button>
-    <button class="btn sec danger wide" data-del>Delete trip</button><div style="height:6px"></div>`);
-  s.el("[data-buy]").onclick = () => { s.close(); buySheet(t); };
-  s.el("[data-copy]").onclick = async () => {
-    const nextYear = (parseDate(t.startDate) && parseDate(t.startDate) < nowISODate());
-    const meta = {
-      name: t.name.replace(/\s*\d{4}$/,"") + " " + (new Date().getFullYear() + (nextYear?1:0)),
-      destination: t.destination||"", startDate:"", endDate:"", types:(t.types||[]).slice(),
-      season:t.season||"Auto", travelers:(t.travelers||[]).slice(), createdAt:Date.now(),
-      createdBy:firstName(me), memberUids:[me.uid],
-    };
-    const ref = await addDoc(tripsCol(), meta);
-    const batch = writeBatch(db);
-    t.items.forEach((i)=>{ const it = { ...i, id:uid(), packed:false, verified:false, attention:null,
-      verifiedAt:null, verifiedBy:"", selfVerified:false, packedBy:"", packedByName:"", toBuy:false };
-      batch.set(itemDoc(ref.id, it.id), it); });
-    await batch.commit().catch(()=>{});
-    s.close(); go({ name:"trip", id:ref.id, tab:"packing" }); toast("Copied — states reset, items kept");
-  };
-  s.el("[data-del]").onclick = async () => {
-    if(!confirm(`Delete "${t.name}"? This can't be undone.`)) return;
-    const snap = await getDocs(itemsCol(t.id));
-    const batch = writeBatch(db); snap.forEach((d)=>batch.delete(d.ref)); batch.delete(tripDoc(t.id));
-    await batch.commit().catch(()=>{}); s.close(); go({ name:"home" }); toast("Trip deleted");
-  };
-  s.el("[data-x]").onclick = s.close;
-}
-
-function dataMenu() {
+    <button class="btn sec danger wide" data-del style="margin-bottom:16px">Delete trip</button>
+    <div class="eyebrow" style="margin:2px 0 8px">App</div>` : "";
   const s = sheet(`<div class="grip"></div>
-    <div class="shead"><h2>Account</h2><button class="x" data-x>✕</button></div>
-    <div class="card" style="padding:14px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
-      <div class="who" style="pointer-events:none">${initialOf(me)}</div>
-      <div><div style="font-weight:750">${esc(firstName(me))}</div><div class="hint">${esc(me.email||"")}</div></div></div>
-    <p class="hint" style="margin:0 0 14px">Trips sync automatically between the allowed accounts, online or off.</p>
+    <div class="shead"><h2>Menu</h2><button class="x" data-x>✕</button></div>
+    ${tripSection}
     <button class="btn sec wide" data-cats style="margin-bottom:10px">Manage categories</button>
+    <button class="btn sec wide" data-tpl style="margin-bottom:14px">Manage templates</button>
+    <div class="card" style="padding:14px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
+      <div class="who" style="pointer-events:none">${initialOf(me)}</div>
+      <div style="min-width:0"><div style="font-weight:750">${esc(firstName(me))}</div><div class="hint">${esc(me.email||"")}</div></div></div>
     <button class="btn sec wide" data-out>Sign out</button><div style="height:6px"></div>`);
+
   s.el("[data-cats]").onclick = () => { s.close(); categoriesSheet(); };
+  s.el("[data-tpl]").onclick = () => { s.close(); templatesSheet(); };
   s.el("[data-out]").onclick = () => { s.close(); signOut(auth); };
+
+  if (t) {
+    s.el("[data-buy]").onclick = () => { s.close(); buySheet(t); };
+    s.el("[data-copy]").onclick = async () => {
+      const nextYear = (parseDate(t.startDate) && parseDate(t.startDate) < nowISODate());
+      const meta = {
+        name: t.name.replace(/\s*\d{4}$/,"") + " " + (new Date().getFullYear() + (nextYear?1:0)),
+        destination: t.destination||"", startDate:"", endDate:"", types:(t.types||[]).slice(),
+        season:t.season||"Auto", travelers:(t.travelers||[]).slice(), createdAt:Date.now(),
+        createdBy:firstName(me), memberUids:[me.uid],
+      };
+      const ref = await addDoc(tripsCol(), meta);
+      const batch = writeBatch(db);
+      t.items.forEach((i)=>{ const it = { ...i, id:uid(), packed:false, verified:false, attention:null,
+        verifiedAt:null, verifiedBy:"", selfVerified:false, packedBy:"", packedByName:"", toBuy:false };
+        batch.set(itemDoc(ref.id, it.id), it); });
+      await batch.commit().catch(()=>{});
+      s.close(); go({ name:"trip", id:ref.id, tab:"packing" }); toast("Copied — states reset, items kept");
+    };
+    s.el("[data-del]").onclick = async () => {
+      if(!confirm(`Delete "${t.name}"? This can't be undone.`)) return;
+      const snap = await getDocs(itemsCol(t.id));
+      const batch = writeBatch(db); snap.forEach((d)=>batch.delete(d.ref)); batch.delete(tripDoc(t.id));
+      await batch.commit().catch(()=>{}); s.close(); go({ name:"home" }); toast("Trip deleted");
+    };
+  }
   s.el("[data-x]").onclick = s.close;
 }
 
@@ -820,6 +832,82 @@ function categoriesSheet() {
   };
   s.el("[data-addcat]").onclick = add;
   s.el("#newcat").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+  draw();
+  s.el("[data-x]").onclick = s.close;
+}
+
+/* templates: edit what each trip-type / season layer contributes to a new trip */
+function templatesSheet() {
+  const tripTypes = TYPE_LIST.filter((k) => k !== "Custom / Blank");
+  const seasons = ["Spring","Summer","Fall","Winter"];
+  const row = (k) => {
+    const custom = !!(state.templates && state.templates[k]);
+    const count = layerItems(k).length;
+    return `<button class="buyrow tplrow" data-layer="${esc(k)}" style="width:100%;text-align:left">
+      <span>${esc(k)}<span class="hint" style="display:block;font-weight:600">${count} item${count===1?"":"s"}${custom?" · customized":""}</span></span>
+      <span style="color:var(--muted)">›</span></button>`;
+  };
+  const s = sheet(`<div class="grip"></div>
+    <div class="shead"><h2>Templates</h2><button class="x" data-x>✕</button></div>
+    <p class="hint" style="margin:0 0 12px">Edit what each layer adds to a new trip. Your changes here don't touch existing trips.</p>
+    <div class="eyebrow" style="margin:4px 0 8px">Trip types</div>
+    <div class="buylist">${tripTypes.map(row).join("")}</div>
+    <div class="eyebrow">Seasons</div>
+    <div class="buylist">${seasons.map(row).join("")}</div>`);
+  s.scrim.querySelectorAll("[data-layer]").forEach((b) => b.onclick = () => { s.close(); templateEditor(b.dataset.layer); });
+  s.el("[data-x]").onclick = s.close;
+}
+
+function templateEditor(key) {
+  let items = layerItems(key).map((d) => ({ n: d.n, c: d.c, req: !!d.req }));
+  const custom = !!(state.templates && state.templates[key]);
+  const cats = catList();
+  const s = sheet(`<div class="grip"></div>
+    <div class="shead"><h2>${esc(key)}</h2><button class="x" data-x>✕</button></div>
+    <div id="tpl-body"></div>
+    <div class="field" style="margin:14px 0 8px"><label>Add an item</label>
+      <input type="text" id="tpl-n" placeholder="e.g. Baby Tylenol" style="margin-bottom:8px">
+      <div class="row" style="gap:8px">${catSelectHTML("tpl-c", cats, "Baby")}
+        <button class="btn" style="width:auto;flex:none;padding:0 18px" data-add>Add</button></div></div>
+    <div class="row" style="margin-top:8px">
+      ${custom ? `<button class="btn sec" data-reset>Reset to default</button>` : ""}
+      <button class="btn" data-save>Save template</button></div>
+    <div style="height:6px"></div>`);
+
+  const draw = () => {
+    const b = s.el("#tpl-body");
+    b.innerHTML = items.length
+      ? `<div class="buylist">${items.map((d, idx) => `<div class="buyrow">
+          <span style="flex:1;min-width:0">${esc(d.n)}<span class="hint" style="display:block;font-weight:600">${esc(d.c)}</span></span>
+          <button class="opt" data-req="${idx}" aria-pressed="${d.req}" style="min-height:34px;padding:5px 10px;font-size:12px;margin-right:4px">${d.req?"Required":"Optional"}</button>
+          <button class="x" data-del="${idx}" aria-label="Remove ${esc(d.n)}">✕</button></div>`).join("")}</div>`
+      : `<div class="empty" style="padding:24px 10px"><p>No items in this template yet. Add some below.</p></div>`;
+    b.querySelectorAll("[data-req]").forEach((btn) => btn.onclick = () => {
+      const i = +btn.dataset.req; items[i].req = !items[i].req; draw(); });
+    b.querySelectorAll("[data-del]").forEach((btn) => btn.onclick = () => {
+      items.splice(+btn.dataset.del, 1); draw(); });
+  };
+  const add = () => {
+    const n = (s.el("#tpl-n").value || "").trim(); if (!n) return;
+    if (items.some((d) => d.n.toLowerCase() === n.toLowerCase())) { toast("Already in this template"); return; }
+    items.push({ n, c: s.el("#tpl-c").value, req: false });
+    s.el("#tpl-n").value = ""; draw();
+  };
+  s.el("#tpl-c").onchange = (e) => onCatSelect(e.target);
+  s.el("[data-add]").onclick = add;
+  s.el("#tpl-n").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+  s.el("[data-save]").onclick = async () => {
+    const next = { ...(state.templates || {}), [key]: items };
+    await setDoc(configDoc(), { templates: next }, { merge: true }).catch(()=>{});
+    s.close(); toast("Template saved");
+  };
+  const resetBtn = s.el("[data-reset]");
+  if (resetBtn) resetBtn.onclick = async () => {
+    if (!confirm(`Reset "${key}" to the built-in default?`)) return;
+    const next = { ...(state.templates || {}) }; delete next[key];
+    await updateDoc(configDoc(), { templates: next }).catch(()=>{});
+    s.close(); toast("Reset to default");
+  };
   draw();
   s.el("[data-x]").onclick = s.close;
 }

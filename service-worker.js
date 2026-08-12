@@ -1,6 +1,6 @@
 // PackCheck service worker — app-shell caching for offline use.
 // Bump CACHE on every deploy so installed devices pick up new files.
-const CACHE = "packcheck-couple-v3";
+const CACHE = "packcheck-couple-v5";
 const SHELL = [
   "./",
   "./index.html",

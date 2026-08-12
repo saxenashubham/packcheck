@@ -206,3 +206,7 @@ a{color:var(--indigo)}
 .buyrow+.buyrow{border-top:1px solid var(--line)}
 .buyrow .x{flex:none;width:34px;height:34px;border-radius:8px;font-size:16px;color:var(--muted);display:grid;place-items:center}
 .buyrow .x:active{background:var(--bg)}
+
+/* ---- persistent hamburger (top-right, every screen) ---- */
+.hb{flex:none;margin-left:auto;margin-right:-6px;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:21px;color:var(--ink)}
+.hb:active{background:var(--indigo-l)}
