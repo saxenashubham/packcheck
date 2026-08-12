@@ -198,3 +198,11 @@ a{color:var(--indigo)}
 /* ---- cross-verification: blocked (packed by you) card ---- */
 .vcard.blocked{border-color:var(--amber-l);background:linear-gradient(180deg,var(--amber-l) 0,var(--card) 46px)}
 .vcard.blocked .btn.ghost{color:var(--amber);border-color:var(--amber-l)}
+
+/* ---- shopping list + category manager rows ---- */
+.tag.buy{background:var(--amber-l);color:#92400e}
+.buylist{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.buyrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;font-size:15px;font-weight:600}
+.buyrow+.buyrow{border-top:1px solid var(--line)}
+.buyrow .x{flex:none;width:34px;height:34px;border-radius:8px;font-size:16px;color:var(--muted);display:grid;place-items:center}
+.buyrow .x:active{background:var(--bg)}

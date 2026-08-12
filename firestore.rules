@@ -23,5 +23,10 @@ service cloud.firestore {
         allow read, write: if isAllowed();
       }
     }
+
+    // Shared app config (custom category list, etc.)
+    match /packcheck_meta/{docId} {
+      allow read, write: if isAllowed();
+    }
   }
 }

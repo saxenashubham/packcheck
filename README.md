@@ -58,6 +58,21 @@ iPhone Safari → Share → Add to Home Screen. Android Chrome → menu → Inst
 Bump `CACHE` in `service-worker.js` (e.g. `packcheck-couple-v2`) or installed phones
 keep serving the old cached shell.
 
+
+## New in this build
+- **Custom categories** — Account menu → Manage categories, or "+ Add category…" in any
+  category picker. The list is shared between both accounts (stored in `packcheck_meta/config`).
+- **Mark for purchase** — item editor → "🛒 Need to buy". Flagged items show a Buy badge.
+- **Shopping list export** — trip menu (⋯) → Shopping list → Copy (new lines / comma).
+  Paste straight into your shopping-list app's bulk add.
+
+> **Rules update required:** this build reads/writes `packcheck_meta/config`. Re-publish
+> `firestore.rules` — it now includes a `match /packcheck_meta/{docId}` block. If you
+> reuse an existing project, copy that block in alongside the trips block.
+
+> Clipboard copy needs a secure context (https or localhost). In some in-app browsers it
+> falls back to a select-to-copy textarea.
+
 ## Data model
 - `packcheck_trips/{tripId}`  — trip metadata (name, dates, types, season, travelers)
 - `packcheck_trips/{tripId}/items/{itemId}` — one doc per packing item

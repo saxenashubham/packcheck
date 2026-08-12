@@ -11,7 +11,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
-  writeBatch, getDocs, arrayUnion
+  writeBatch, getDocs, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ---------------- boot / config ---------------- */
@@ -130,7 +130,7 @@ const mkItem = (name, cat, extra = {}) => ({
   required: false, packed: false, verified: false, attention: null,
   verifyQuestion: qFor(name.trim(), cat || "Essentials"),
   notes: "", tags: [], assignee: "", source: "manual",
-  packedBy: "", packedByName: "", selfVerified: false,
+  packedBy: "", packedByName: "", selfVerified: false, toBuy: false,
   verifiedAt: null, verifiedBy: "", createdAt: Date.now(), ...extra,
 });
 const composeList = ({ types, season, startDate, travelers }) => {
@@ -148,8 +148,11 @@ const composeList = ({ types, season, startDate, travelers }) => {
   });
   return [...byKey.values()];
 };
+const baseCats = () => (state.categoriesLoaded && state.categories.length ? state.categories : KNOWN_CATS);
+const catList = (t) => { const s = new Set(baseCats());
+  (t ? t.items : state.items).forEach((i) => i.category && s.add(i.category)); return [...s]; };
 const catMatch = (raw) => { const t = raw.trim().toLowerCase();
-  return KNOWN_CATS.find((c) => c.toLowerCase() === t) || null; };
+  return baseCats().find((c) => c.toLowerCase() === t) || KNOWN_CATS.find((c) => c.toLowerCase() === t) || null; };
 const parseBulk = (text, fallbackCat = "Essentials") => {
   const out = []; let cur = fallbackCat;
   text.split(/\r?\n/).forEach((line0) => {
@@ -207,11 +210,12 @@ const tripsCol = () => collection(db, P + "trips");
 const tripDoc = (id) => doc(db, P + "trips", id);
 const itemsCol = (tid) => collection(db, P + "trips", tid, "items");
 const itemDoc = (tid, iid) => doc(db, P + "trips", tid, "items", iid);
+const configDoc = () => doc(db, P + "meta", "config");
 
 /* ---------------- app state ---------------- */
 let me = null;
-const state = { trips: [], items: [], tripId: null, tripsReady: false };
-let unsubTrips = null, unsubItems = null;
+const state = { trips: [], items: [], tripId: null, tripsReady: false, categories: [], categoriesLoaded: false };
+let unsubTrips = null, unsubItems = null, unsubConfig = null;
 let route = { name: "home" };
 let openCats = {};
 const go = (r) => { route = r; render(); window.scrollTo(0, 0); };
@@ -227,8 +231,10 @@ onAuthStateChanged(auth, (user) => {
   me = user;
   if (unsubTrips) { unsubTrips(); unsubTrips = null; }
   if (unsubItems) { unsubItems(); unsubItems = null; }
+  if (unsubConfig) { unsubConfig(); unsubConfig = null; }
   state.trips = []; state.items = []; state.tripsReady = false;
-  if (user && allowed(user)) watchTrips();
+  state.categories = []; state.categoriesLoaded = false;
+  if (user && allowed(user)) { watchTrips(); watchConfig(); }
   render();
 });
 async function signIn() {
@@ -251,6 +257,42 @@ function ensureMember(t) {
   if (!me) return;
   if ((t.memberUids || []).includes(me.uid)) return;
   updateDoc(tripDoc(t.id), { memberUids: arrayUnion(me.uid) }).catch(() => {});
+}
+// Shared, editable category list lives in one config doc for both accounts.
+function watchConfig() {
+  unsubConfig = onSnapshot(configDoc(), (snap) => {
+    if (!snap.exists()) { setDoc(configDoc(), { categories: KNOWN_CATS.slice() }).catch(()=>{}); return; }
+    const c = snap.data() || {};
+    state.categories = Array.isArray(c.categories) && c.categories.length ? c.categories : KNOWN_CATS.slice();
+    state.categoriesLoaded = true;
+    if (route.name === "trip" || route.name === "new") render();
+  }, () => {});
+}
+async function addCategory(name) {
+  name = (name || "").trim(); if (!name) return "";
+  if (baseCats().some((c) => c.toLowerCase() === name.toLowerCase())) return name;
+  await setDoc(configDoc(), { categories: arrayUnion(name) }, { merge: true }).catch(()=>{});
+  return name;
+}
+const CAT_ADD = "＋ Add category…";
+const catSelectHTML = (id, list, selected) =>
+  `<select id="${id}">${list.map((c)=>`<option ${c===selected?"selected":""}>${esc(c)}</option>`).join("")}<option value="__add">${CAT_ADD}</option></select>`;
+async function onCatSelect(sel) {
+  if (sel.value !== "__add") return sel.value;
+  const name = await addCategory(prompt("New category name") || "");
+  if (!name) { sel.selectedIndex = 0; return sel.value; }
+  if (![...sel.options].some((o) => o.textContent === name)) {
+    const opt = document.createElement("option"); opt.textContent = name;
+    sel.insertBefore(opt, sel.querySelector('option[value="__add"]'));
+  }
+  sel.value = name; return name;
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("Copied to clipboard"); return; } catch {}
+  const ta = document.createElement("textarea"); ta.value = text;
+  ta.style.position = "fixed"; ta.style.top = "-1000px"; document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch {}
+  ta.remove(); toast(ok ? "Copied to clipboard" : "Couldn't auto-copy — long-press to select");
 }
 function watchItems(tid) {
   if (unsubItems) unsubItems();
@@ -447,6 +489,7 @@ function itemRow(i) {
   const sub = [];
   if (i.assignee) sub.push(`<span class="tag">${esc(i.assignee)}</span>`);
   (i.tags||[]).forEach((tg)=>sub.push(`<span class="tag">#${esc(tg)}</span>`));
+  if (i.toBuy) sub.push(`<span class="tag buy">🛒 Buy</span>`);
   if (i.notes) sub.push(`📝 ${esc(i.notes)}`);
   let state_ = "";
   if (i.attention) state_ = `<span class="state warn">⚠ Attention</span>`;
@@ -564,7 +607,7 @@ function sheet(inner) {
 }
 
 function addSheet(t) {
-  const cats = KNOWN_CATS;
+  const cats = catList(t);
   const s = sheet(`<div class="grip"></div>
     <div class="shead"><h2>Add items</h2><button class="x" data-x>✕</button></div>
     <div class="seg"><button data-m="bulk" aria-pressed="true">Paste list</button><button data-m="one" aria-pressed="false">One item</button></div>
@@ -573,9 +616,10 @@ function addSheet(t) {
     const b = s.el("#add-body");
     if (mode === "one") {
       b.innerHTML = `<div class="field"><label>Item</label><input type="text" id="a1" placeholder="Passport"></div>
-        <div class="field"><label>Category</label><select id="a1c">${cats.map((c)=>`<option>${c}</option>`).join("")}</select></div>
+        <div class="field"><label>Category</label>${catSelectHTML("a1c", cats)}</div>
         <button class="btn wide" data-add1>Add item</button>`;
       s.el("#a1").focus();
+      s.el("#a1c").onchange = (e) => onCatSelect(e.target);
       s.el("[data-add1]").onclick = async () => {
         const n=s.el("#a1").value.trim(); if(!n) return;
         const it = mkItem(n, s.el("#a1c").value);
@@ -594,8 +638,9 @@ Power bank
 Toiletries: Sunscreen"></textarea>
         <div class="hint">Headings like ELECTRONICS, [Baby], or Toiletries: set the category. Duplicates are skipped.</div></div>
         <div class="field"><label>Default category for un-categorized lines</label>
-          <select id="abc">${cats.map((c)=>`<option ${c==="Essentials"?"selected":""}>${c}</option>`).join("")}</select></div>
+          ${catSelectHTML("abc", cats, "Essentials")}</div>
         <button class="btn wide" data-addbulk>Add to list</button>`;
+      s.el("#abc").onchange = (e) => onCatSelect(e.target);
       s.el("[data-addbulk]").onclick = async () => {
         const txt=s.el("#ab").value; if(!txt.trim()) return;
         const parsed = parseBulk(txt, s.el("#abc").value);
@@ -618,30 +663,35 @@ Toiletries: Sunscreen"></textarea>
 
 function itemSheet(t, i) {
   if (!i) return;
-  const cats = KNOWN_CATS.slice(); if (!cats.includes(i.category)) cats.push(i.category);
+  const cats = catList(t); if (!cats.includes(i.category)) cats.push(i.category);
   const s = sheet(`<div class="grip"></div>
     <div class="shead"><h2>Edit item</h2><button class="x" data-x>✕</button></div>
     <div class="field"><label>Name</label><input type="text" id="e-n" value="${esc(i.name)}"></div>
-    <div class="row"><div class="field"><label>Category</label><select id="e-c">${cats.map((c)=>`<option ${c===i.category?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+    <div class="row"><div class="field"><label>Category</label>${catSelectHTML("e-c", cats, i.category)}</div>
       <div class="field"><label>Quantity</label><input type="text" id="e-q" inputmode="numeric" value="${i.qty}"></div></div>
     <div class="field"><label>Required for this trip?</label>
       <div class="opts"><button type="button" class="opt" data-req="true" aria-pressed="${i.required}">Required</button>
         <button type="button" class="opt" data-req="false" aria-pressed="${!i.required}">Optional</button></div></div>
+    <div class="field"><label>Shopping</label>
+      <div class="opts"><button type="button" class="opt" data-buy aria-pressed="${!!i.toBuy}">🛒 Need to buy</button></div></div>
     <div class="field"><label>Assign to (optional)</label>
       <input type="text" id="e-a" value="${esc(i.assignee||"")}" placeholder="${esc((t.travelers&&t.travelers[0])||"Traveler")}"></div>
     <div class="field"><label>Verification question</label><input type="text" id="e-vq" value="${esc(i.verifyQuestion)}"></div>
     <div class="field"><label>Notes (optional)</label><input type="text" id="e-note" value="${esc(i.notes||"")}" placeholder="Keep in personal bag, not checked luggage"></div>
     <div class="row" style="margin-top:4px"><button class="btn sec danger" data-del>Delete</button><button class="btn" data-save>Save</button></div>
     <div style="height:6px"></div>`);
-  let req = i.required;
+  let req = i.required, buy = !!i.toBuy;
+  s.el("#e-c").onchange = (e) => onCatSelect(e.target);
   s.scrim.querySelectorAll("[data-req]").forEach((b) => b.onclick = () => {
     req = b.dataset.req === "true";
     s.scrim.querySelectorAll("[data-req]").forEach((x)=>x.setAttribute("aria-pressed", (x.dataset.req==="true")===req)); });
+  const buyBtn = s.el("[data-buy]");
+  buyBtn.onclick = () => { buy = !buy; buyBtn.setAttribute("aria-pressed", buy); };
   s.el("[data-save]").onclick = async () => {
     const n=s.el("#e-n").value.trim(); if(!n) return toast("Name can't be empty");
     await updateDoc(itemDoc(t.id, i.id), {
       name:n, category:s.el("#e-c").value, qty:Math.max(1, parseInt(s.el("#e-q").value,10)||1),
-      required:req, assignee:s.el("#e-a").value.trim(),
+      required:req, toBuy:buy, assignee:s.el("#e-a").value.trim(),
       verifyQuestion:s.el("#e-vq").value.trim()||qFor(n, s.el("#e-c").value), notes:s.el("#e-note").value.trim(),
     }).catch(()=>{}); s.close(); toast("Saved");
   };
@@ -670,8 +720,10 @@ function failSheet(t, i) {
 function tripMenu(t) {
   const s = sheet(`<div class="grip"></div>
     <div class="shead"><h2>${esc(t.name)}</h2><button class="x" data-x>✕</button></div>
+    <button class="btn sec wide" data-buy style="margin-bottom:10px">🛒 Shopping list (to buy)</button>
     <button class="btn sec wide" data-copy style="margin-bottom:10px">Copy as new trip</button>
     <button class="btn sec danger wide" data-del>Delete trip</button><div style="height:6px"></div>`);
+  s.el("[data-buy]").onclick = () => { s.close(); buySheet(t); };
   s.el("[data-copy]").onclick = async () => {
     const nextYear = (parseDate(t.startDate) && parseDate(t.startDate) < nowISODate());
     const meta = {
@@ -683,7 +735,7 @@ function tripMenu(t) {
     const ref = await addDoc(tripsCol(), meta);
     const batch = writeBatch(db);
     t.items.forEach((i)=>{ const it = { ...i, id:uid(), packed:false, verified:false, attention:null,
-      verifiedAt:null, verifiedBy:"", selfVerified:false, packedBy:"", packedByName:"" };
+      verifiedAt:null, verifiedBy:"", selfVerified:false, packedBy:"", packedByName:"", toBuy:false };
       batch.set(itemDoc(ref.id, it.id), it); });
     await batch.commit().catch(()=>{});
     s.close(); go({ name:"trip", id:ref.id, tab:"packing" }); toast("Copied — states reset, items kept");
@@ -704,8 +756,71 @@ function dataMenu() {
       <div class="who" style="pointer-events:none">${initialOf(me)}</div>
       <div><div style="font-weight:750">${esc(firstName(me))}</div><div class="hint">${esc(me.email||"")}</div></div></div>
     <p class="hint" style="margin:0 0 14px">Trips sync automatically between the allowed accounts, online or off.</p>
+    <button class="btn sec wide" data-cats style="margin-bottom:10px">Manage categories</button>
     <button class="btn sec wide" data-out>Sign out</button><div style="height:6px"></div>`);
+  s.el("[data-cats]").onclick = () => { s.close(); categoriesSheet(); };
   s.el("[data-out]").onclick = () => { s.close(); signOut(auth); };
+  s.el("[data-x]").onclick = s.close;
+}
+
+/* shopping list: collect items marked "to buy", copy out for the shopping app */
+function buySheet(t) {
+  let list = t.items.filter((i) => i.toBuy);
+  const s = sheet(`<div class="grip"></div>
+    <div class="shead"><h2>Shopping list</h2><button class="x" data-x>✕</button></div>
+    <div id="buy-body"></div>`);
+  const draw = () => {
+    const b = s.el("#buy-body");
+    if (!list.length) {
+      b.innerHTML = `<div class="empty" style="padding:30px 10px"><div class="big">🛒</div>
+        <p>Nothing marked to buy yet. Open any item, toggle “Need to buy”, and it collects here.</p></div>`;
+      return;
+    }
+    b.innerHTML = `<p class="hint" style="margin:0 0 12px">${list.length} item${list.length>1?"s":""} to buy. Copy them straight into your shopping list.</p>
+      <div class="buylist">${list.map((i)=>`<div class="buyrow"><span>${esc(i.name)}${i.qty>1?` ×${i.qty}`:""}</span>
+        <button class="x" data-unbuy="${i.id}" aria-label="Remove ${esc(i.name)}">✕</button></div>`).join("")}</div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn sec" data-copynl>Copy — new lines</button>
+        <button class="btn sec" data-copycomma>Copy — comma</button></div>`;
+    b.querySelectorAll("[data-unbuy]").forEach((btn) => btn.onclick = () => {
+      const id = btn.dataset.unbuy;
+      updateDoc(itemDoc(t.id, id), { toBuy:false }).catch(()=>{});
+      list = list.filter((x)=>x.id!==id); draw();
+    });
+    b.querySelector("[data-copynl]").onclick = () => copyText(list.map((i)=>i.name).join("\n"));
+    b.querySelector("[data-copycomma]").onclick = () => copyText(list.map((i)=>i.name).join(", "));
+  };
+  draw();
+  s.el("[data-x]").onclick = s.close;
+}
+
+/* manage the shared category list */
+function categoriesSheet() {
+  let cats = baseCats().slice();
+  const s = sheet(`<div class="grip"></div>
+    <div class="shead"><h2>Categories</h2><button class="x" data-x>✕</button></div>
+    <div class="field" style="margin-bottom:10px"><div class="row" style="gap:8px">
+      <input type="text" id="newcat" placeholder="New category (e.g. Photography)">
+      <button class="btn" style="width:auto;flex:none;padding:0 18px" data-addcat>Add</button></div></div>
+    <div id="cats-body"></div>
+    <p class="hint" style="margin-top:12px">Removing a category only hides it from the picker. Items already using it keep it.</p>`);
+  const draw = () => {
+    s.el("#cats-body").innerHTML = `<div class="buylist">${cats.map((c)=>`<div class="buyrow">
+      <span>${esc(c)}</span><button class="x" data-rm="${esc(c)}" aria-label="Remove ${esc(c)}">✕</button></div>`).join("")}</div>`;
+    s.el("#cats-body").querySelectorAll("[data-rm]").forEach((btn) => btn.onclick = () => {
+      const name = btn.dataset.rm;
+      cats = cats.filter((c)=>c!==name); draw();
+      setDoc(configDoc(), { categories: arrayRemove(name) }, { merge:true }).catch(()=>{});
+    });
+  };
+  const add = async () => {
+    const inp = s.el("#newcat"); const name = (inp.value||"").trim(); if (!name) return;
+    if (cats.some((c)=>c.toLowerCase()===name.toLowerCase())) { toast("Already exists"); inp.value=""; return; }
+    cats.push(name); inp.value=""; draw(); await addCategory(name);
+  };
+  s.el("[data-addcat]").onclick = add;
+  s.el("#newcat").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+  draw();
   s.el("[data-x]").onclick = s.close;
 }
 
